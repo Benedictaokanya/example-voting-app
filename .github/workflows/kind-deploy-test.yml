@@ -44,6 +44,18 @@ jobs:
           kind load docker-image capstone-result:ci --name voting-capstone
           kind load docker-image capstone-worker:ci --name voting-capstone
 
+      - name: Create database secret
+        env:
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+        run: |
+          if [ -z "$POSTGRES_PASSWORD" ]; then
+            echo "POSTGRES_PASSWORD GitHub Actions secret is not configured."
+            exit 1
+          fi
+          kubectl create secret generic db-secret \
+            --from-literal=postgres-password="$POSTGRES_PASSWORD" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
       - name: Deploy Voting App with Helm
         shell: bash
         run: |

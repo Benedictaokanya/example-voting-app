@@ -7,7 +7,7 @@
 # for example, if you were on Intel (amd64) and wanted to build for ARM, you would use:
 # docker buildx build --platform "linux/arm64/v8" .
 
-# build compiles the program for the builder's local platform
+# Build the application
 FROM --platform=${BUILDPLATFORM} mcr.microsoft.com/dotnet/sdk:10.0 AS build
 ARG TARGETPLATFORM
 ARG TARGETARCH
@@ -21,9 +21,15 @@ RUN dotnet restore -a $TARGETARCH
 COPY . .
 RUN dotnet publish -c release -o /app -a $TARGETARCH --self-contained false --no-restore
 
-# app image
+# Runtime image
 FROM mcr.microsoft.com/dotnet/runtime:10.0
 WORKDIR /app
+
+# Install the library required by GSSAPI/Kerberos
+USER root
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libgssapi-krb5-2 \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN useradd --create-home --uid 10001 appuser
 

@@ -54,6 +54,15 @@ kubectl cluster-info
 kubectl get nodes
 ```
 
+Create the database password as a Kubernetes Secret before installing the chart. The password is supplied locally and is not stored in the Helm values file or committed to Git. Replace the example value with a strong password for your environment; do not use the demo password in a shared or production environment.
+
+If you already created `db-secret` in this cluster, skip the `kubectl create secret` command. Kubernetes will return an error if a Secret with that name already exists.
+
+```bash
+kubectl create secret generic db-secret \
+  --from-literal=postgres-password='REPLACE_WITH_YOUR_PASSWORD'
+```
+
 Install the chart:
 
 ```bash
@@ -160,7 +169,7 @@ A successful validation or plan does not mean AWS resources were created. An aut
 ## Security notes
 
 - GitHub Actions uses the automatically provided `GITHUB_TOKEN` for publishing images; do not paste tokens into source files.
-- The Helm values currently include a simple PostgreSQL password intended only for this learning/demo setup. It is not suitable for production. Before treating the project as fully compliant with the “no secrets in Git” requirement or deploying to a shared environment, move database credentials to a Kubernetes Secret and avoid committing real credentials.
+- The Helm chart reads the PostgreSQL password from a pre-created Kubernetes Secret named `db-secret` (key `postgres-password`); the password value is not stored in the chart's `values.yaml`. Create the Secret in each target cluster before installing the chart, and never commit the real password. Kubernetes Secrets are not automatically encrypted at rest in every cluster configuration, so configure encryption and access controls for shared or production environments. The local capstone Secret was created with a demo password and must not be reused in production.
 - The chart uses `emptyDir` for the database and Redis data, so those data directories are ephemeral and are not a production persistence strategy.
 - Trivy findings should be reviewed; a successful scan job does not imply zero vulnerabilities.
 

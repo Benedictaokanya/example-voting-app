@@ -12,7 +12,7 @@ vote:
   service:
     type: NodePort
     port: 5000
-    targetPort: 808080
+    targetPort: 8080
     nodePort: 31000
 
 result:

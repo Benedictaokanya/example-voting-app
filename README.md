@@ -196,3 +196,20 @@ kind delete cluster --name voting-app
 ```
 
 This removes the local Kind cluster and its workloads.
+
+## Evidence Screenshots
+
+### Vote Application
+![Vote page after submitting a vote](screenshots/vote-page.png)
+
+### Results Application
+![Result page showing the vote count](screenshots/result-page.png)
+
+### Kubernetes Workloads
+![Kubernetes pods showing workload status](screenshots/pods-ready.png)
+
+### Helm Release Status
+![Helm release status](screenshots/helm-status.png)
+
+### Helm Rollback
+![Helm rollback evidence](screenshots/rollback.png)

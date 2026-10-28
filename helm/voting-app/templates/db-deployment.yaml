@@ -24,7 +24,10 @@ spec:
             - name: POSTGRES_USER
               value: {{ .Values.db.env.postgresUser | quote }}
             - name: POSTGRES_PASSWORD
-              value: {{ .Values.db.env.postgresPassword | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.db.env.existingSecret }}
+                  key: postgres-password
             - name: POSTGRES_DB
               value: {{ .Values.db.env.postgresDb | quote }}
           ports:

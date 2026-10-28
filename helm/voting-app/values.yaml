@@ -52,7 +52,7 @@ db:
     pullPolicy: IfNotPresent
   env:
     postgresUser: "postgres"
-    postgresPassword: "postgres"
+    existingSecret: "db-secret"
     postgresDb: "postgres"
   service:
     type: ClusterIP

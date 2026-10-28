@@ -45,8 +45,9 @@ jobs:
           kind load docker-image capstone-worker:ci --name voting-capstone
 
       - name: Deploy Voting App with Helm
+        shell: bash
         run: |
-          helm upgrade --install voting-app ./helm/voting-app \
+          if helm upgrade --install voting-app ./helm/voting-app \
             --set vote.image.repository=capstone-vote \
             --set vote.image.tag=ci \
             --set vote.image.pullPolicy=IfNotPresent \
@@ -56,7 +57,22 @@ jobs:
             --set worker.image.repository=capstone-worker \
             --set worker.image.tag=ci \
             --set worker.image.pullPolicy=IfNotPresent \
-            --wait --timeout 5m
+            --wait --timeout 5m; then
+            echo "Helm deployment completed successfully."
+          else
+            echo "::group::Kubernetes resources"
+            kubectl get deployments,pods,services -o wide || true
+            echo "::endgroup::"
+            echo "::group::Pod descriptions"
+            kubectl describe pods || true
+            echo "::endgroup::"
+            for pod in $(kubectl get pods -o name 2>/dev/null); do
+              echo "::group::Logs for $pod"
+              kubectl logs "$pod" --all-containers=true --tail=100 || true
+              echo "::endgroup::"
+            done
+            exit 1
+          fi
 
       - name: Confirm Kubernetes workloads
         run: |

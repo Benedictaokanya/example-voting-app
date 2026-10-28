@@ -161,6 +161,10 @@ The following screenshots document the application's functionality, Kubernetes d
 
 ![Helm rollback evidence](screenshots/rollback.png)
 
+### Worker logs
+
+![Worker logs showing database and Redis connectivity and vote processing](screenshots/worker-logs.png)
+
 ## Helm rollback
 
 Helm release revisions allow a previous release revision to be restored. To inspect the release history and perform a rollback, use:

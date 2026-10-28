@@ -1,48 +1,52 @@
 # Voting App Capstone
 
-A containerized voting application deployed to Kubernetes with Helm. This capstone documents the local Kind deployment, infrastructure-as-code, CI image build and scan, and Kubernetes deployment validation.
+A containerized voting application deployed to Kubernetes with Helm. This project demonstrates container image builds and scanning, Kubernetes deployment, infrastructure-as-code, automated deployment checks, and Helm release recovery.
 
-## Project status
+## Project summary
 
-- **Local Kubernetes deployment:** verified on a Kind cluster named `voting-app`.
-- **Application flow:** tested by submitting a vote on the Vote page and confirming it appeared on the Result page.
-- **Helm:** chart linting and template rendering passed; release `voting-app` reached `deployed`.
-- **GitHub Actions:** the Capstone CI CD workflow and Kind Kubernetes Deployment Check both completed successfully for the latest recorded commit.
-- **AWS EKS:** Terraform configuration is included, but an EKS cluster was not created. AWS Organizations policies denied the required `eks:CreateCluster` and `eks:CreateNodegroup` actions. The workaround was to validate and run the application locally on Kind rather than attempt to bypass the organization's policy.
+- **Application:** Vote, Result, Worker, Redis, and PostgreSQL workloads.
+- **Local deployment:** Deployed and tested on a Kind Kubernetes cluster.
+- **Application flow:** Submitted a vote through the Vote interface and confirmed the updated count on the Result interface.
+- **Helm:** Chart linting and template rendering passed; the `voting-app` release reached the `deployed` state.
+- **Rollback:** Performed a Helm rollback and checked workload health afterward.
+- **Automation:** Both GitHub Actions workflows completed successfully on the latest commit that added the Kubernetes database Secret step.
+- **AWS EKS:** Terraform configuration is included and validated, but an EKS cluster was not created because AWS Organizations policies denied `eks:CreateCluster` and `eks:CreateNodegroup`. Kind was used to continue validating Kubernetes and Helm without bypassing that restriction.
 
 ## Architecture
 
 ![Voting App architecture](architecture.excalidraw.png)
 
-The application consists of five workloads:
+The application contains five workloads:
 
-1. **Vote** — Python web interface where a user selects an option.
+1. **Vote** — Python web interface where users submit a vote.
 2. **Redis** — temporarily holds incoming votes.
-3. **Worker** — consumes votes from Redis and stores them in PostgreSQL.
+3. **Worker** — reads votes from Redis and writes them to PostgreSQL.
 4. **PostgreSQL** — stores the vote data.
-5. **Result** — Node.js web interface that displays the vote totals.
+5. **Result** — Node.js web interface that displays vote totals.
 
-The Vote and Result services are exposed to the local machine through Kubernetes port-forwarding during local testing. Redis and PostgreSQL are internal ClusterIP services.
+The Vote and Result services are exposed for local testing. Redis and PostgreSQL are internal cluster services.
 
 ## Repository layout
 
-- `helm/voting-app/` — Helm chart and Kubernetes templates for the five workloads and services.
+- `helm/voting-app/` — Helm chart and Kubernetes templates for the application workloads and services.
 - `terraform/` — Terraform configuration for an AWS EKS cluster and managed node group.
-- `k8s-specifications/` — standalone Kubernetes YAML manifests.
+- `k8s-specifications/` — standalone Kubernetes manifests.
 - `.github/workflows/capstone-ci-cd.yml` — builds application images, scans them with Trivy, and publishes images to GitHub Container Registry on pushes to `main`.
-- `.github/workflows/kind-deploy-test.yml` — creates a temporary Kind cluster in GitHub Actions, builds and loads the images, installs the Helm chart, checks workload rollouts, and smoke-tests both web apps.
+- `.github/workflows/kind-deploy-test.yml` — creates an ephemeral Kind cluster, builds and loads application images, creates the database Secret, installs the Helm chart, waits for workloads, and smoke-tests both web apps.
 - `architecture.excalidraw.png` — architecture diagram.
+- `screenshots/` — screenshots documenting application functionality, Kubernetes workload status, Helm release status, and rollback.
 
-## Prerequisites
+## Tools used
 
-For local deployment, install Docker, kubectl, Kind, and Helm. The versions used during this validation were:
+Versions used during validation:
 
 - Docker Engine 29.9.2
 - kubectl 1.35.9
 - Kind 0.30.0
 - Helm 4.3.1
+- Kubernetes v1.34.0 in the local Kind cluster
 
-The local Kind node ran Kubernetes v1.34.0. Other compatible versions may also work.
+Compatible versions may also work.
 
 ## Deploy locally with Kind
 
@@ -54,16 +58,14 @@ kubectl cluster-info
 kubectl get nodes
 ```
 
-Create the database password as a Kubernetes Secret before installing the chart. The password is supplied locally and is not stored in the Helm values file or committed to Git. Replace the example value with a strong password for your environment; do not use the demo password in a shared or production environment.
-
-If you already created `db-secret` in this cluster, skip the `kubectl create secret` command. Kubernetes will return an error if a Secret with that name already exists.
+Create the database password as a Kubernetes Secret before installing the chart. Supply your own password locally; do not commit it to Git. If `db-secret` already exists in the cluster, skip the create command.
 
 ```bash
 kubectl create secret generic db-secret \
   --from-literal=postgres-password='REPLACE_WITH_YOUR_PASSWORD'
 ```
 
-Install the chart:
+Validate and install the chart:
 
 ```bash
 helm lint ./helm/voting-app
@@ -85,7 +87,7 @@ A healthy deployment should show the `db`, `redis`, `result`, `vote`, and `worke
 
 ### Open the Vote and Result pages
 
-Open two terminal windows and keep both port-forward commands running.
+Keep each port-forward command running in a separate terminal.
 
 Terminal 1:
 
@@ -99,12 +101,12 @@ Terminal 2:
 kubectl port-forward service/result 18081:5001
 ```
 
-Then open:
+Open:
 
 - Vote page: http://127.0.0.1:18080
 - Result page: http://127.0.0.1:18081
 
-Submit a vote on the Vote page and check the Result page. The port-forward processes must remain running while you use these pages. In this environment, using `127.0.0.1` worked when `localhost` did not.
+Submit a vote on the Vote page and confirm the updated count on the Result page. The port-forward processes must remain running while you use the pages.
 
 ### Useful diagnostics
 
@@ -113,35 +115,55 @@ kubectl get pods -o wide
 kubectl describe pods
 kubectl logs deployment/worker --tail=50
 kubectl logs deployment/result --tail=50
-curl -I http://127.0.0.1:18080
 ```
 
-The Worker log should show successful database and Redis connections and vote processing. A body-parser deprecation warning appeared in the Result logs during testing, but the Result app still started and connected to the database.
+Worker logs can be used to inspect Redis/database connectivity and vote processing. A body-parser deprecation warning appeared in the Result logs during testing, but the Result application still started and connected to the database.
 
 ## GitHub Actions
 
-Two workflows support automated validation:
-
 ### Capstone CI CD
 
-`.github/workflows/capstone-ci-cd.yml` runs on pushes to `main`, pull requests targeting `main`, and manual dispatch. It builds the Vote, Result, and Worker images and scans each image with Trivy for high and critical vulnerabilities. On a push to `main`, it publishes both `latest` and commit-SHA-tagged images to GitHub Container Registry using the workflow's `GITHUB_TOKEN`.
+The workflow `.github/workflows/capstone-ci-cd.yml` builds the Vote, Result, and Worker images and scans them with Trivy for high and critical vulnerabilities. On pushes to `main`, it publishes images to GitHub Container Registry using the workflow's `GITHUB_TOKEN`.
 
 The current Trivy configuration reports high and critical findings but uses `exit-code: '0'`; findings do not by themselves fail the job. Review scan output rather than interpreting a successful job as proof that no vulnerabilities exist.
 
+Latest successful run: [Capstone CI CD](https://github.com/Benedictaokanya/example-voting-app/actions/runs/40773156217).
+
 ### Kind Kubernetes Deployment Check
 
-`.github/workflows/kind-deploy-test.yml` creates an ephemeral Kind cluster on the GitHub runner, builds and loads the three application images, installs the Helm chart, waits for all five deployments to roll out, and checks that the Vote and Result web pages return successful HTTP responses.
+The workflow `.github/workflows/kind-deploy-test.yml` creates a temporary Kind cluster on the GitHub runner, builds and loads the three application images, creates the `db-secret` Kubernetes Secret from the repository Actions secret `POSTGRES_PASSWORD`, installs the Helm chart, waits for all five deployments to roll out, and checks that the Vote and Result web apps return successful HTTP responses.
 
-Latest recorded successful runs:
+Latest successful run: [Kind Kubernetes Deployment Check](https://github.com/Benedictaokanya/example-voting-app/actions/runs/40773156289).
 
-- [Capstone CI CD](https://github.com/Benedictaokanya/example-voting-app/actions/runs/40722590349)
-- [Kind Kubernetes Deployment Check](https://github.com/Benedictaokanya/example-voting-app/actions/runs/40722590327)
+[View all GitHub Actions runs](https://github.com/Benedictaokanya/example-voting-app/actions).
 
-Earlier Kind checks failed while the service target ports were being corrected. The target ports for Vote and Result were aligned with the applications' non-root port 8080, then the latest recorded deployment check passed.
+## Deployment evidence
 
-## Rollback
+The following screenshots document the application's functionality, Kubernetes deployment state, Helm release, and rollback demonstration.
 
-Helm keeps release revisions so a previous revision can be restored. First inspect the available revisions and identify the revision to restore:
+### Vote application
+
+![Vote page after submitting a vote](screenshots/vote-page.png)
+
+### Results application
+
+![Results page showing the vote count](screenshots/result-page.png)
+
+### Kubernetes workloads
+
+![Kubernetes pods showing workload status](screenshots/pods-ready.png)
+
+### Helm release status
+
+![Helm release status](screenshots/helm-status.png)
+
+### Helm rollback
+
+![Helm rollback evidence](screenshots/rollback.png)
+
+## Helm rollback
+
+Helm release revisions allow a previous release revision to be restored. To inspect the release history and perform a rollback, use:
 
 ```bash
 helm history voting-app
@@ -150,11 +172,11 @@ helm status voting-app
 kubectl get deployments,pods
 ```
 
-Replace `<REVISION>` with an actual revision shown by `helm history`. Confirm the Vote and Result pages still work after rollback. A rollback demonstration should be performed and captured as evidence before claiming that rollback was demonstrated live.
+Replace `<REVISION>` with a revision shown by `helm history`. After a rollback, verify the workloads and confirm the Vote and Result pages still respond. The rollback evidence screenshot is included above.
 
 ## Terraform and AWS EKS limitation
 
-The `terraform/` directory defines AWS EKS cluster and managed node group resources. The configuration was validated, but applying it was blocked because the AWS account's Organizations service control policy denied `eks:CreateCluster` and `eks:CreateNodegroup`. No EKS cluster was created by this project. The local Kind deployment was used to continue testing Kubernetes and Helm without bypassing the account restriction.
+The `terraform/` directory defines AWS EKS cluster and managed node group resources. The Terraform configuration was validated, but applying it was blocked because the AWS account's Organizations service control policy denied `eks:CreateCluster` and `eks:CreateNodegroup`. No EKS cluster was created by this project. The local Kind deployment and GitHub Actions Kind deployment check were used to validate the Kubernetes and Helm workflow without bypassing the account restriction.
 
 To validate the Terraform configuration locally, from the `terraform/` directory:
 
@@ -166,26 +188,14 @@ terraform plan
 
 A successful validation or plan does not mean AWS resources were created. An authorized AWS environment is required to deploy the EKS infrastructure.
 
-## Security notes
+## Security and limitations
 
-- GitHub Actions uses the automatically provided `GITHUB_TOKEN` for publishing images; do not paste tokens into source files.
-- The Helm chart reads the PostgreSQL password from a pre-created Kubernetes Secret named `db-secret` (key `postgres-password`); the password value is not stored in the chart's `values.yaml`. Create the Secret in each target cluster before installing the chart, and never commit the real password. Kubernetes Secrets are not automatically encrypted at rest in every cluster configuration, so configure encryption and access controls for shared or production environments. The local capstone Secret was created with a demo password and must not be reused in production.
-- The chart uses `emptyDir` for the database and Redis data, so those data directories are ephemeral and are not a production persistence strategy.
+- The Helm chart reads the PostgreSQL password from a pre-created Kubernetes Secret named `db-secret`, using the key `postgres-password`. The password is not stored in the chart's `values.yaml`.
+- The Kind GitHub Actions workflow reads the password from the repository Actions secret `POSTGRES_PASSWORD`. Do not commit passwords or tokens to source control.
+- Kubernetes Secrets require appropriate access controls and may need encryption at rest for shared or production environments.
+- The chart uses `emptyDir` for database and Redis data. Those data directories are ephemeral and are not a production persistence strategy.
 - Trivy findings should be reviewed; a successful scan job does not imply zero vulnerabilities.
-
-## Evidence to capture
-
-Add screenshots of the actual results to a `screenshots/` folder before final submission:
-
-1. Vote page after submitting a vote.
-2. Result page showing the updated vote count.
-3. `kubectl get pods` showing the five workloads ready.
-4. `helm status voting-app` showing the release as deployed.
-5. Worker logs showing Redis/database connections and vote processing.
-6. Successful GitHub Actions runs for both workflows.
-7. Helm history and the result of a rollback followed by a health check, after you have performed that demonstration.
-
-Do not include passwords, access tokens, or other sensitive values in screenshots.
+- EKS deployment remains unverified because the AWS account policy blocked cluster creation.
 
 ## Cleanup
 
@@ -196,20 +206,3 @@ kind delete cluster --name voting-app
 ```
 
 This removes the local Kind cluster and its workloads.
-
-## Evidence Screenshots
-
-### Vote Application
-![Vote page after submitting a vote](screenshots/vote-page.png)
-
-### Results Application
-![Result page showing the vote count](screenshots/result-page.png)
-
-### Kubernetes Workloads
-![Kubernetes pods showing workload status](screenshots/pods-ready.png)
-
-### Helm Release Status
-![Helm release status](screenshots/helm-status.png)
-
-### Helm Rollback
-![Helm rollback evidence](screenshots/rollback.png)

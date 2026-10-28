@@ -1,0 +1,95 @@
+name: Kind Kubernetes Deployment Check
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'vote/**'
+      - 'result/**'
+      - 'worker/**'
+      - 'helm/voting-app/**'
+      - '.github/workflows/kind-deploy-test.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-and-smoke-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create Kubernetes cluster with Kind
+        uses: helm/kind-action@v1.12.0
+        with:
+          cluster_name: voting-capstone
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Build application images
+        run: |
+          docker build -t capstone-vote:ci ./vote
+          docker build -t capstone-result:ci ./result
+          docker build -t capstone-worker:ci ./worker
+
+      - name: Load images into Kind
+        run: |
+          kind load docker-image capstone-vote:ci --name voting-capstone
+          kind load docker-image capstone-result:ci --name voting-capstone
+          kind load docker-image capstone-worker:ci --name voting-capstone
+
+      - name: Deploy Voting App with Helm
+        run: |
+          helm upgrade --install voting-app ./helm/voting-app \
+            --set vote.image.repository=capstone-vote \
+            --set vote.image.tag=ci \
+            --set vote.image.pullPolicy=IfNotPresent \
+            --set result.image.repository=capstone-result \
+            --set result.image.tag=ci \
+            --set result.image.pullPolicy=IfNotPresent \
+            --set worker.image.repository=capstone-worker \
+            --set worker.image.tag=ci \
+            --set worker.image.pullPolicy=IfNotPresent \
+            --wait --timeout 5m
+
+      - name: Confirm Kubernetes workloads
+        run: |
+          kubectl get deployments,pods,services
+          kubectl rollout status deployment/vote --timeout=180s
+          kubectl rollout status deployment/result --timeout=180s
+          kubectl rollout status deployment/worker --timeout=180s
+          kubectl rollout status deployment/redis --timeout=180s
+          kubectl rollout status deployment/db --timeout=180s
+
+      - name: Smoke-test vote and results web apps
+        shell: bash
+        run: |
+          kubectl port-forward service/vote 18080:5000 >/tmp/vote-port-forward.log 2>&1 &
+          VOTE_PF_PID=$!
+          kubectl port-forward service/result 18081:5001 >/tmp/result-port-forward.log 2>&1 &
+          RESULT_PF_PID=$!
+          trap 'kill "$VOTE_PF_PID" "$RESULT_PF_PID" 2>/dev/null || true' EXIT
+
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:18080/ >/dev/null && \
+               curl --fail --silent http://127.0.0.1:18081/ >/dev/null; then
+              echo "PASS: vote app returned HTTP 200"
+              echo "PASS: results app returned HTTP 200"
+              exit 0
+            fi
+            sleep 2
+          done
+
+          echo "Vote port-forward log:"
+          cat /tmp/vote-port-forward.log || true
+          echo "Results port-forward log:"
+          cat /tmp/result-port-forward.log || true
+          kubectl get pods -o wide
+          kubectl describe pods
+          exit 1

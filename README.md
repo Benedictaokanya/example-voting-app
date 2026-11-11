@@ -119,6 +119,34 @@ kubectl logs deployment/result --tail=50
 
 Worker logs can be used to inspect Redis/database connectivity and vote processing. A body-parser deprecation warning appeared in the Result logs during testing, but the Result application still started and connected to the database.
 
+## Troubleshooting and implementation fixes
+
+The project history records several configuration and image changes made while refining the container and Kubernetes deployment. These examples are based on committed changes in this repository.
+
+### Worker container runtime dependency
+
+The Worker Dockerfile was updated to install the `libgssapi-krb5-2` runtime package in the .NET runtime image. This records a runtime dependency adjustment made to the Worker image.
+
+**What this demonstrates:** Container images need the runtime libraries required by the application, not only the dependencies used during the build.
+
+**Evidence:** [Worker image runtime dependency update](https://github.com/Benedictaokanya/example-voting-app/commit/f043942090cfb1343e0c4ec72c8c1fd52946e93a)
+
+### Kubernetes service port configuration
+
+The Vote service Helm values were corrected so that `targetPort` uses `8080` rather than the invalid value `808080`.
+
+**What this demonstrates:** Service port configuration must match the port exposed by the application container. An incorrect target port can prevent traffic from reaching the intended container port.
+
+**Evidence:** [Service targetPort correction](https://github.com/Benedictaokanya/example-voting-app/commit/64ccbe299dda1a06029ff271a829e979e36c8aa5)
+
+### Database Secret required by the deployment workflow
+
+The Kind deployment workflow was updated to create the `db-secret` Kubernetes Secret from the GitHub Actions `POSTGRES_PASSWORD` secret before installing the Helm chart.
+
+**What this demonstrates:** Deployment automation must create or otherwise provide required Kubernetes configuration and secrets before deploying workloads that depend on them.
+
+**Evidence:** [Database Secret added to Kind workflow](https://github.com/Benedictaokanya/example-voting-app/commit/764dbe48009a35904aa653f7745f905aa8ee87f6)
+
 ## GitHub Actions
 
 ### Capstone CI CD

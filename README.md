@@ -149,17 +149,34 @@ The Kind deployment workflow was updated to create the `db-secret` Kubernetes Se
 
 ## GitHub Actions
 
-### Capstone CI CD
+The repository has two separate GitHub Actions workflows. They can run independently; the Kind deployment check does not consume the images published by the CI/CD workflow.
 
-The workflow `.github/workflows/capstone-ci-cd.yml` builds the Vote, Result, and Worker images and scans them with Trivy for high and critical vulnerabilities. On pushes to `main`, it publishes images to GitHub Container Registry using the workflow's `GITHUB_TOKEN`.
+### Capstone CI CD: build, scan, and publish
 
-The current Trivy configuration reports high and critical findings but uses `exit-code: '0'`; findings do not by themselves fail the job. Review scan output rather than interpreting a successful job as proof that no vulnerabilities exist.
+Workflow file: `.github/workflows/capstone-ci-cd.yml`.
 
-Latest successful run: [Capstone CI CD](https://github.com/Benedictaokanya/example-voting-app/actions/runs/40773156217).
+**Triggers:** A push to `main`, a pull request targeting `main`, or a manual `workflow_dispatch`.
 
-### Kind Kubernetes Deployment Check
+The workflow builds the Vote, Result, and Worker images and scans each image with Trivy for CRITICAL and HIGH vulnerabilities. On a push to `main`, it then logs in to GitHub Container Registry and publishes the images with `latest` and commit SHA tags. The registry publishing steps do not run for pull requests or manual runs.
 
-The workflow `.github/workflows/kind-deploy-test.yml` creates a temporary Kind cluster on the GitHub runner, builds and loads the three application images, creates the `db-secret` Kubernetes Secret from the repository Actions secret `POSTGRES_PASSWORD`, installs the Helm chart, waits for all five deployments to roll out, and checks that the Vote and Result web apps return successful HTTP responses.
+**Scan limitation:** Trivy is configured with `exit-code: '0'` and `ignore-unfixed: true`. This makes the scan reporting-only: findings can appear in the output, but they do not fail the workflow. A successful run therefore does not mean that no vulnerabilities were found. This configuration surfaces findings for review without making the scan a CI failure. To make the scan an enforcement gate later, review and triage the existing findings, decide the vulnerability policy, and change the Trivy `exit-code` to `'1'` so matching findings fail the job.
+
+Latest successful run: [Capstone CI CD](https://github.com/Benedictaokanya/example-voting-app/actions/runs/40773156217). **Interpret the successful status alongside the non-blocking scan limitation above.**
+
+### Kind Kubernetes Deployment Check: deploy and smoke-test
+
+Workflow file: `.github/workflows/kind-deploy-test.yml`.
+
+**Triggers:** A manual `workflow_dispatch`, or a push to `main` that changes files under `vote/`, `result/`, `worker/`, `helm/voting-app/`, or the Kind workflow file itself.
+
+This workflow runs independently of the image publishing workflow. It creates a temporary Kind cluster on the GitHub runner, builds its own Vote, Result, and Worker images from the checked-out source, and loads those images directly into Kind. It does not pull or deploy the images published to GitHub Container Registry by the Capstone CI CD workflow.
+
+It then creates the `db-secret` Kubernetes Secret from the repository Actions secret `POSTGRES_PASSWORD`, installs the Helm chart using the locally loaded images, and checks two things:
+
+1. All five deployments (Vote, Result, Worker, Redis, and PostgreSQL) successfully roll out.
+2. The Vote and Result web applications each return a successful HTTP response from their root endpoint.
+
+These are deployment and basic HTTP smoke checks. They do not test vote submission, vote processing, database writes, result updates, or every application function as part of this automated workflow.
 
 Latest successful run: [Kind Kubernetes Deployment Check](https://github.com/Benedictaokanya/example-voting-app/actions/runs/40773156289).
 
